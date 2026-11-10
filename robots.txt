@@ -1,4 +1,3 @@
 User-agent: *
 Allow: /
-
 Sitemap: https://yame92.github.io/waminjeongeum/sitemap.xml
