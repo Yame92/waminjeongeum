@@ -201,26 +201,26 @@ function rankingStats(rows){
  }
  const starts=new Map();
  for(const chunk of chunks){const c=chunk[0];if(!starts.has(c))starts.set(c,[]);starts.get(c).push(chunk);}
- function canWord(word){
+ function wordScore(word){
   word=word.toLowerCase();
-  const dp=new Uint8Array(word.length+1);dp[0]=1;
+  const dp=new Uint32Array(word.length+1);
   for(let i=0;i<word.length;i++){
-   if(!dp[i])continue;
-   for(const chunk of starts.get(word[i])||[]){if(word.startsWith(chunk,i))dp[i+chunk.length]=1;}
+   dp[i+1]=Math.max(dp[i+1],dp[i]);
+   for(const chunk of starts.get(word[i])||[]){if(word.startsWith(chunk,i))dp[i+chunk.length]=Math.max(dp[i+chunk.length],dp[i]+chunk.length);}
   }
-  return !!dp[word.length];
+  return {matched:dp[word.length],letters:word.length};
  }
- const canPhrase=phrase=>phrase.split(/\s+/).every(canWord);
- const possible=rankingDictionary.filter(canPhrase).length;
- const categories=Object.entries(rankingGroups).map(([name,phrases])=>({name,total:phrases.length,possible:phrases.filter(canPhrase).length}));
+ function evaluate(phrases){let matched=0,letters=0,possible=0;for(const phrase of phrases){let m=0,n=0;for(const word of phrase.match(/[A-Za-z]+/g)||[]){const s=wordScore(word);m+=s.matched;n+=s.letters;}matched+=m;letters+=n;if(n&&m===n)possible++;}return {matched,letters,possible,rate:letters?100*matched/letters:0,total:phrases.length};}
+ const overall=evaluate(rankingDictionary);
+ const categories=Object.entries(rankingGroups).map(([name,phrases])=>({name,...evaluate(phrases)}));
  const upper=[...upperSet].sort(),lower=[...lowerSet].sort(),combined=[...single].sort();
- const result={upper,lower,combined,total:combined.length,possible,categories,rate:possible/rankingWordCount*100};
+ const result={...overall,upper,lower,combined,total:combined.length,categories,fullRate:100*overall.possible/rankingWordCount};
  rankingStatsCache.set(rows,result);return result;
 }
 function getRankingItems(editionName='classic'){
- const items=rankingLanguages.filter(x=>x.edition===editionName).map(x=>({...x,stats:rankingStats(x.rows())})).filter(x=>x.stats.total>0).sort((a,b)=>b.stats.possible-a.stats.possible||a.name.localeCompare(b.name,'ko'));
+ const items=rankingLanguages.filter(x=>x.edition===editionName).map(x=>({...x,stats:rankingStats(x.rows())})).filter(x=>x.stats.total>0).sort((a,b)=>b.stats.matched-a.stats.matched||a.name.localeCompare(b.name,'ko'));
  let previous=-1,rank=0;
- for(let i=0;i<items.length;i++){if(items[i].stats.possible!==previous){rank=i+1;previous=items[i].stats.possible;}items[i].rank=rank;}
+ for(let i=0;i<items.length;i++){if(items[i].stats.matched!==previous){rank=i+1;previous=items[i].stats.matched;}items[i].rank=rank;}
  return items;
 }
 function refreshLanguageBadges(){
@@ -247,15 +247,15 @@ function renderRanking(){
   const card=document.createElement('article');card.className='rank-card';
   const head=document.createElement('div');head.className='rank-head';
   const name=document.createElement('strong');name.textContent=(rank===1?'🥇 ':rank===2?'🥈 ':rank===3?'🥉 ':'🏅 ')+rank+'위 · '+item.name;
-  const count=document.createElement('strong');count.className='rank-count';count.textContent=item.stats.possible+'/'+rankingWordCount+'개 채팅 · '+item.stats.rate.toFixed(1)+'%';
+  const count=document.createElement('strong');count.className='rank-count';count.textContent='문자 표현력 '+item.stats.rate.toFixed(1)+'%';
   head.append(name,count);card.appendChild(head);
   const bar=document.createElement('div');bar.className='rank-bar';const fill=document.createElement('span');fill.style.width=item.stats.rate+'%';bar.appendChild(fill);card.appendChild(bar);
-  const sub=document.createElement('p');sub.className='rank-meta';sub.textContent='대소문자 통합 · 단독 출력 '+item.stats.total+'/26자 · 실측 복합 조각 포함';card.appendChild(sub);
+  const sub=document.createElement('p');sub.className='rank-meta';sub.textContent='표현 가능 문자 '+item.stats.matched.toLocaleString()+'/'+item.stats.letters.toLocaleString()+'자 · 완전 표현 채팅 '+item.stats.possible+'/'+rankingWordCount+'개 ('+item.stats.fullRate.toFixed(1)+'%) · 대소문자 통합 · 단독 출력 '+item.stats.total+'/26자 · 실측 복합 조각 포함';card.appendChild(sub);
   const details=document.createElement('details');details.className='rank-details';const summary=document.createElement('summary');summary.textContent='표현 가능 알파벳 확인';details.appendChild(summary);
   for(const [label,chars] of [['대문자 단독',item.stats.upper],['소문자 단독',item.stats.lower],['대소문자 통합',item.stats.combined]]){const p=document.createElement('p');p.textContent=label+' · '+(chars.length?chars.join('  '):'없음');details.appendChild(p);}
   const info=document.createElement('p');info.textContent='대소문자 대체를 허용해 실측 출력 조각 전체로 게임 채팅 표현력을 계산합니다. 복합 조각은 분리하지 않습니다. 실제 게임 내 문장 결합은 추가 검증이 필요합니다.';details.appendChild(info);
   card.appendChild(details);
-  const breakdown=document.createElement('details');breakdown.className='rank-details';const bs=document.createElement('summary');bs.textContent='분류별 게임 채팅 표현력';breakdown.appendChild(bs);for(const c of item.stats.categories){const p=document.createElement('p');p.textContent=c.name+' · '+c.possible+'/'+c.total+'개 ('+(100*c.possible/c.total).toFixed(1)+'%)';breakdown.appendChild(p);}card.appendChild(breakdown);
+  const breakdown=document.createElement('details');breakdown.className='rank-details';const bs=document.createElement('summary');bs.textContent='분류별 게임 채팅 표현력';breakdown.appendChild(bs);for(const c of item.stats.categories){const p=document.createElement('p');p.textContent=c.name+' · 문자 '+c.matched+'/'+c.letters+'자 ('+c.rate.toFixed(1)+'%) · 완전 표현 '+c.possible+'/'+c.total+'개';breakdown.appendChild(p);}card.appendChild(breakdown);
   const btn=document.createElement('button');btn.type='button';btn.className='rank-translate';btn.textContent='이 언어로 번역하기 →';btn.addEventListener('click',()=>{
    activateTab('translator');setTranslatorEdition(item.edition);
    updateDirection(['orc','troll','undead','tauren','forever-tauren','forever-undead','forever-orc'].includes(item.id)?'h2a':'a2h');
